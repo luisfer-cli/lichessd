@@ -18,7 +18,7 @@ about your games entirely from the terminal.
 
 ```bash
 # Install
-git clone https://github.com/your/lichessd
+git clone https://github.com/luisfer-cli/lichessd
 cd lichessd && uv sync
 
 # Get your API token at https://lichess.org/account/oauth/token
