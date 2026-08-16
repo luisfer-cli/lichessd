@@ -6,7 +6,7 @@ about your games entirely from the terminal.
 ## Features
 
 - Connects to Lichess via personal API token
-- Detects new moves in correspondence games via polling + real-time event streaming
+- Detects new moves in correspondence games in real time via Lichess event streams
 - Sends moves and draw offers to specific games
 - Seeks new correspondence games and handles challenges
 - Fetches random puzzles by theme, difficulty, and color
@@ -87,7 +87,6 @@ Options:
   --on-move COMMAND      Hook: run COMMAND when a new move arrives
   --on-game-start COMMAND Hook: run COMMAND when a correspondence game starts
   --on-game-finish COMMAND Hook: run COMMAND when a correspondence game ends
-  --poll-interval SECS   Seconds between API polls (default: 30)
   --default-angle THEME  Default puzzle theme (default: mix)
   --daemonize, -d        Detach and run in the background
   --foreground, -f       Stay in foreground (default behavior)
@@ -102,8 +101,8 @@ lichessd --on-move ~/bin/notify-move.sh --on-game-start ~/bin/notify-game.sh
 # Daemonize
 lichessd -d
 
-# Custom socket and poll interval
-lichessd --socket /tmp/chess.sock --poll-interval 60
+# Custom socket
+lichessd --socket /tmp/chess.sock
 ```
 
 ## Unix socket protocol
@@ -323,16 +322,18 @@ flowchart LR
     D --> C
     C --> B
     B --> A
-    B --> E["GameStore<br/>(poll + SSE)"]
+    B --> E["GameStore<br/>(event streams)"]
 ```
 
-1. **Polling** (`GET /api/account/playing` every 30s): detects changes in existing
-   correspondence games by comparing FEN and last move.
-2. **Event streaming** (`GET /api/stream/event`): real-time SSE connection for new game
+1. **Initial sync** (`GET /api/account/playing` once at startup): discovers correspondence
+   games already in progress and starts a stream for each.
+2. **Global event stream** (`GET /api/stream/event`): real-time connection for new game
    starts, challenges, and game completions.
-3. **Unix socket server**: accepts client connections, dispatches commands, broadcasts
+3. **Per-game event streams** (`GET /api/board/game/stream/{id}`): real-time move detection —
+   each `gameState` event carries the full move list, so no polling is needed.
+4. **Unix socket server**: accepts client connections, dispatches commands, broadcasts
    events to all connected clients.
-4. **Hooks**: external shell scripts run asynchronously on game events.
+5. **Hooks**: external shell scripts run asynchronously on game events.
 
 ## Building a standalone binary
 
@@ -371,7 +372,7 @@ src/lichessd/
 ├── api.py            LichessAPI — all HTTP calls, retry logic, rate limiting
 ├── config.py         Config — CLI args, env vars, config file parsing
 ├── daemon.py         Daemonization (double-fork), PID file, signal handlers
-├── games.py          GameStore — polling, SSE event streaming, game state tracking
+├── games.py          GameStore — event streams, game state tracking
 ├── notify.py         Hook command execution with environment variables
 ├── protocol.py       JSON Lines encoding/decoding for Unix socket protocol
 ├── puzzles.py        Puzzle fetching helper

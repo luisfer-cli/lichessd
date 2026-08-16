@@ -58,7 +58,7 @@ async def _run(config: Config) -> None:
 
     try:
         await server.start()
-        await store.start(poll_interval=config.poll_interval)
+        await store.start()
 
         watch_task = asyncio.create_task(_shutdown_watch())
 

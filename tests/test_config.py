@@ -50,7 +50,6 @@ class TestFromArgs(unittest.TestCase):
             cfg = Config.from_args([])
         self.assertEqual(cfg.api_key, "lip_env")
         self.assertEqual(cfg.default_angle, "mix")
-        self.assertEqual(cfg.poll_interval, 30.0)
         self.assertIsNone(cfg.on_move)
 
     def test_cli_overrides(self) -> None:
@@ -58,14 +57,12 @@ class TestFromArgs(unittest.TestCase):
             [
                 "--api-key", "lip_cli",
                 "--socket", "/tmp/s.sock",
-                "--poll-interval", "12.5",
                 "--default-angle", "mateIn2",
                 "--on-move", "notify.sh",
             ]
         )
         self.assertEqual(cfg.api_key, "lip_cli")
         self.assertEqual(cfg.socket_path, Path("/tmp/s.sock"))
-        self.assertEqual(cfg.poll_interval, 12.5)
         self.assertEqual(cfg.default_angle, "mateIn2")
         self.assertEqual(cfg.on_move, "notify.sh")
 

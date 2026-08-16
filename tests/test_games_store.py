@@ -58,9 +58,9 @@ def _entry(game_id: str, last_move: str) -> dict[str, Any]:
     }
 
 
-class TestPollOnce(unittest.IsolatedAsyncioTestCase):
-    async def test_lifecycle_events(self) -> None:
-        api = FakeAPI()
+class TestInitialSync(unittest.IsolatedAsyncioTestCase):
+    async def test_discovers_existing_games(self) -> None:
+        api = FakeAPI(playing=[_entry("g1", "e7e5"), _entry("g2", "")])
         store = GameStore(api=api)
         events: list[tuple[str, dict[str, object]]] = []
 
@@ -68,21 +68,12 @@ class TestPollOnce(unittest.IsolatedAsyncioTestCase):
             events.append((event_type, data))
 
         store.on_event = on_event
-
-        api.playing = [_entry("g1", "")]
-        await store._poll_once()
-        self.assertEqual([e[0] for e in events], ["game_start"])
+        await store._initial_sync()
+        self.assertEqual([e[0] for e in events], ["game_start", "game_start"])
         self.assertEqual(events[0][1]["game_id"], "g1")
-
-        api.playing = [_entry("g1", "e7e5")]
-        await store._poll_once()
-        self.assertEqual([e[0] for e in events], ["game_start", "move"])
-        self.assertEqual(events[1][1]["last_move"], "e7e5")
-
-        api.playing = []
-        await store._poll_once()
-        self.assertEqual([e[0] for e in events], ["game_start", "move", "game_finish"])
-        self.assertEqual(events[2][1]["game_id"], "g1")
+        self.assertEqual(events[1][1]["game_id"], "g2")
+        self.assertEqual(set(store._games), {"g1", "g2"})
+        self.assertEqual(store.get_game("g1").last_move, "e7e5")  # type: ignore[union-attr]
 
     async def test_skips_non_correspondence(self) -> None:
         entry = _entry("g1", "")
@@ -90,18 +81,22 @@ class TestPollOnce(unittest.IsolatedAsyncioTestCase):
         api = FakeAPI(playing=[entry])
         store = GameStore(api=api)
         events: list[str] = []
-        store.on_event = lambda et, d: events.append(et)  # type: ignore[assignment]
-        await store._poll_once()
+
+        async def on_event(event_type: str, data: dict[str, object]) -> None:
+            events.append(event_type)
+
+        store.on_event = on_event
+        await store._initial_sync()
         self.assertEqual(events, [])
         self.assertEqual(store.list_games(), [])
 
-    async def test_poll_failure_is_swallowed(self) -> None:
+    async def test_sync_failure_is_swallowed(self) -> None:
         class BrokenAPI:
             async def get_playing(self, nb: int = 20) -> dict[str, Any]:
                 raise RuntimeError("boom")
 
         store = GameStore(api=BrokenAPI())  # type: ignore[arg-type]
-        await store._poll_once()  # should not raise
+        await store._initial_sync()  # should not raise
 
 
 class TestSendMove(unittest.IsolatedAsyncioTestCase):
@@ -194,7 +189,34 @@ class TestStreamGame(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("g1", store._games)
         self.assertEqual(events[1][1]["game_id"], "g1")
 
-    async def test_start_stream_on_poll_game_start(self) -> None:
+    async def test_game_full_updates_fen_and_detects_move(self) -> None:
+        api = FakeAPI()
+        api.stream_responses = [
+            FakeStreamResponse(
+                200,
+                [
+                    '{"type": "gameFull", "initialFen": "startpos", '
+                    '"state": {"moves": "e2e4 e7e5", "status": "started"}}'
+                ],
+            ),
+            FakeStreamResponse(404),
+        ]
+        store = _store_with_game(api)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event_type: str, data: dict[str, object]) -> None:
+            events.append((event_type, data))
+
+        store.on_event = on_event
+        await store.stream_game("g1")
+        self.assertEqual([e[0] for e in events], ["move"])
+        self.assertEqual(events[0][1]["last_move"], "e7e5")
+        board = chess.Board()
+        board.push_uci("e2e4")
+        board.push_uci("e7e5")
+        self.assertEqual(store._games["g1"].fen, board.fen())
+
+    async def test_start_stream_on_sync_game_start(self) -> None:
         api = FakeAPI(playing=[_entry("g1", "")])
         store = GameStore(api=api)
 
@@ -202,7 +224,7 @@ class TestStreamGame(unittest.IsolatedAsyncioTestCase):
             pass
 
         store.on_event = on_event
-        await store._poll_once()
+        await store._initial_sync()
         self.assertIn("g1", store._stream_tasks)
         await store._stream_tasks["g1"]
         self.assertNotIn("g1", store._stream_tasks)

@@ -51,7 +51,6 @@ class Daemon:
                 sys.executable, "-m", "lichessd.__main__",
                 "--foreground",
                 f"--socket={SOCKET}",
-                "--poll-interval=9999",
                 f"--on-move={HOOK_SCRIPT}",
                 f"--on-game-start={HOOK_SCRIPT}",
                 f"--on-game-finish={HOOK_SCRIPT}",

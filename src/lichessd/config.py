@@ -15,7 +15,6 @@ class Config:
     on_move: str | None = None
     on_game_start: str | None = None
     on_game_finish: str | None = None
-    poll_interval: float = 30.0
     default_angle: str = "mix"
     daemonize: bool = False
     foreground: bool = False
@@ -71,12 +70,6 @@ class Config:
             help="Command to run when a correspondence game finishes",
         )
         parser.add_argument(
-            "--poll-interval",
-            type=float,
-            default=30.0,
-            help="Seconds between game state polls (default: 30)",
-        )
-        parser.add_argument(
             "--default-angle",
             default="mix",
             help="Default puzzle theme (default: mix)",
@@ -110,7 +103,6 @@ class Config:
             on_move=args.on_move,
             on_game_start=args.on_game_start,
             on_game_finish=args.on_game_finish,
-            poll_interval=args.poll_interval,
             default_angle=args.default_angle,
             daemonize=args.daemonize,
             foreground=args.foreground,
