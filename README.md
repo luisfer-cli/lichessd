@@ -315,18 +315,15 @@ lichessd --on-move ~/bin/chess-notify.sh \
 
 ## How it works
 
-```
-┌────────────┐   ┌──────────────┐   ┌─────────────────┐
-│  nc/socat  │──▶│ Unix socket  │──▶│  LichessAPI      │──▶ lichess.org
-│  scripts   │   │ (JSON lines) │   │  (httpx client)  │
-│  apps      │◀──│              │◀──│                  │◀──
-└────────────┘   └──────────────┘   └─────────────────┘
-                       │
-                       ▼
-              ┌─────────────────┐
-              │    GameStore    │
-              │  (poll + SSE)   │
-              └─────────────────┘
+```mermaid
+flowchart LR
+    A["nc/socat<br/>scripts &amp; apps"] --> B["Unix socket<br/>(JSON lines)"]
+    B --> C["LichessAPI<br/>(httpx client)"]
+    C --> D[lichess.org]
+    D --> C
+    C --> B
+    B --> A
+    B --> E["GameStore<br/>(poll + SSE)"]
 ```
 
 1. **Polling** (`GET /api/account/playing` every 30s): detects changes in existing
