@@ -5,8 +5,9 @@ description = "Unix daemon for Lichess API integration — correspondence games,
 authors = [
     { name = "Luis Fernando Rodriguez", email = "luis.rodriguez21@ucr.ac.cr" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
+    "chess>=1.10",
     "httpx>=0.28.1",
 ]
 

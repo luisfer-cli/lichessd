@@ -29,10 +29,10 @@ def daemonize(pid_file: Path) -> None:
     os.dup2(null, sys.stderr.fileno())
     os.close(null)
 
-    _install_signal_handlers()
+    install_signal_handlers()
 
 
-def _install_signal_handlers() -> None:
+def install_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, _handle_exit)
     signal.signal(signal.SIGINT, _handle_exit)
     signal.signal(signal.SIGHUP, signal.SIG_IGN)

@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from lichessd.api import LichessAPI
 
+import chess
+
 logger = logging.getLogger(__name__)
 
 EventCallback = Callable[[str, dict[str, object]], Coroutine[None, None, None]]
@@ -37,6 +39,7 @@ class GameStore:
     _games: dict[str, GameState] = field(default_factory=dict)
     _poll_task: asyncio.Task[None] | None = None
     _events_task: asyncio.Task[None] | None = None
+    _stream_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
 
     async def _emit(self, event_type: str, data: dict[str, object]) -> None:
         if self.on_event:
@@ -85,6 +88,7 @@ class GameStore:
             self._games[game_id] = new_state
 
             if old_state is None:
+                self._start_stream(game_id)
                 await self._emit("game_start", _game_state_to_event(new_state))
             elif old_state.last_move != last_move and last_move:
                 await self._emit("move", _game_state_to_event(new_state))
@@ -93,6 +97,7 @@ class GameStore:
         for game_id in removed:
             state = self._games.pop(game_id, None)
             if state:
+                self._stop_stream(game_id)
                 await self._emit("game_finish", {"game_id": game_id})
 
     async def poll_loop(self, interval: float = 30.0) -> None:
@@ -115,7 +120,13 @@ class GameStore:
                     await asyncio.sleep(60)
                     continue
                 if response.status_code != 200:
-                    logger.warning("Event stream returned %d", response.status_code)
+                    logger.warning(
+                        "Event stream returned %d, retrying in 30s",
+                        response.status_code,
+                    )
+                    await response.aclose()
+                    await asyncio.sleep(30)
+                    continue
                 async for line in response.aiter_lines():
                     line = line.strip()
                     if not line:
@@ -141,6 +152,7 @@ class GameStore:
                                 seconds_left=game.get("secondsLeft", 0),
                             )
                             self._games[state.game_id] = state
+                            self._start_stream(state.game_id)
                             await self._emit(
                                 "game_start",
                                 _game_state_to_event(state),
@@ -150,13 +162,20 @@ class GameStore:
                         gid = event_game.get("gameId", event_game.get("id", ""))
                         if gid in self._games:
                             del self._games[gid]
+                        self._stop_stream(gid)
                         await self._emit("game_finish", {"game_id": gid})
+                logger.warning("Event stream closed, reconnecting in 2s")
+                await response.aclose()
+                await asyncio.sleep(2)
             except Exception:
                 logger.exception("Event stream error, reconnecting in 30s")
                 await asyncio.sleep(30)
 
     async def start(self, poll_interval: float = 30.0) -> None:
-        await self._poll_once()
+        try:
+            await asyncio.wait_for(self._poll_once(), timeout=10.0)
+        except (TimeoutError, Exception):
+            logger.warning("Initial poll failed, API may be unreachable")
         self._poll_task = asyncio.create_task(self.poll_loop(poll_interval))
         self._events_task = asyncio.create_task(self._stream_events_loop())
 
@@ -165,6 +184,9 @@ class GameStore:
             self._poll_task.cancel()
         if self._events_task:
             self._events_task.cancel()
+        for task in self._stream_tasks.values():
+            task.cancel()
+        self._stream_tasks.clear()
 
     def list_games(self) -> list[dict[str, object]]:
         return [_game_state_to_event(s) for s in self._games.values()]
@@ -179,38 +201,109 @@ class GameStore:
         *,
         offering_draw: bool = False,
     ) -> dict[str, object]:
-        return await self.api.make_move(game_id, move, offering_draw=offering_draw)
+        uci_move = _try_convert_to_uci(self._games.get(game_id), move)
+        return await self.api.make_move(game_id, uci_move, offering_draw=offering_draw)
+
+    def _start_stream(self, game_id: str) -> None:
+        if game_id in self._stream_tasks:
+            return
+        task = asyncio.create_task(self.stream_game(game_id))
+        self._stream_tasks[game_id] = task
+        task.add_done_callback(lambda _: self._stream_tasks.pop(game_id, None))
+
+    def _stop_stream(self, game_id: str) -> None:
+        task = self._stream_tasks.pop(game_id, None)
+        if task and not task.done():
+            task.cancel()
 
     async def stream_game(self, game_id: str) -> None:
-        response = await self.api.stream_game(game_id)
-        async for line in response.aiter_lines():
-            line = line.strip()
-            if not line:
-                continue
+        while game_id in self._games:
             try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
+                response = await self.api.stream_game(game_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Game stream %s error, reconnecting in 5s", game_id)
+                await asyncio.sleep(5)
                 continue
-            event_type = event.get("type", "")
-            if event_type == "gameState":
-                state = self._games.get(game_id)
-                if state:
-                    moves = event.get("moves", "")
-                    move_list = moves.split()
-                    last_move = move_list[-1] if move_list else ""
-                    status = event.get("status", "")
-                    is_finished = status not in ("started", "", None)
-                    state.last_move = last_move
-                    state.moves = moves
-                    state.fen = event.get("fen", state.fen)
-                    await self._emit("move", _game_state_to_event(state))
-                    if is_finished:
-                        del self._games[game_id]
-                        winner = event.get("winner", "")
-                        await self._emit(
-                            "game_finish",
-                            {"game_id": game_id, "winner": winner, "status": status},
-                        )
+
+            try:
+                if response.status_code in (401, 403, 404):
+                    logger.warning(
+                        "Game stream %s ended with status %d",
+                        game_id,
+                        response.status_code,
+                    )
+                    await response.aclose()
+                    return
+                if response.status_code != 200:
+                    logger.warning(
+                        "Game stream %s returned %d, retrying in 5s",
+                        game_id,
+                        response.status_code,
+                    )
+                    await response.aclose()
+                    await asyncio.sleep(5)
+                    continue
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("type") == "gameState":
+                        await self._handle_game_state(game_id, event)
+                        if game_id not in self._games:
+                            return
+                logger.warning("Game stream %s closed, reconnecting in 2s", game_id)
+                await response.aclose()
+                await asyncio.sleep(2)
+            except asyncio.CancelledError:
+                await response.aclose()
+                raise
+            except Exception:
+                logger.exception("Game stream %s error, reconnecting in 5s", game_id)
+                await asyncio.sleep(5)
+
+    async def _handle_game_state(self, game_id: str, event: dict[str, object]) -> None:
+        state = self._games.get(game_id)
+        if state is None:
+            return
+
+        moves = str(event.get("moves", ""))
+        move_list = moves.split()
+        last_move = move_list[-1] if move_list else ""
+        status = event.get("status", "")
+        is_finished = status not in ("started", "", None)
+
+        changed = bool(last_move) and state.last_move != last_move
+        state.moves = moves
+        state.fen = str(event.get("fen", state.fen))
+        if changed:
+            state.last_move = last_move
+            await self._emit("move", _game_state_to_event(state))
+
+        if is_finished:
+            self._games.pop(game_id, None)
+            winner = event.get("winner", "")
+            await self._emit(
+                "game_finish",
+                {"game_id": game_id, "winner": winner, "status": status},
+            )
+
+
+def _try_convert_to_uci(state: GameState | None, move: str) -> str:
+    if not state or not state.fen:
+        return move
+
+    try:
+        board = chess.Board(state.fen)
+        chess_move = board.parse_san(move)
+        return chess_move.uci()
+    except ValueError:
+        return move
 
 
 def _game_state_to_event(state: GameState) -> dict[str, object]:

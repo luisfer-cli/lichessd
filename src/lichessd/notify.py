@@ -17,15 +17,15 @@ _ENV_KEYS = (
     "opponent",
     "seconds_left",
 )
-_ARGS_KEYS = ("game_id", "move", "fen", "color", "is_my_turn")
+_ARGS_KEYS = ("game_id", "last_move", "fen", "color", "is_my_turn")
 
 
-async def run_hook(command: str, event_data: dict[str, Any]) -> None:
+async def run_hook(command: str, event_type: str, event_data: dict[str, Any]) -> None:
     if not command:
         return
 
     rendered = _render_command(command, event_data)
-    env = _build_env(event_data)
+    env = _build_env(event_type, event_data)
 
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -55,8 +55,9 @@ def _render_command(command: str, data: dict[str, Any]) -> str:
     return f"{command} {args}"
 
 
-def _build_env(data: dict[str, Any]) -> dict[str, str]:
+def _build_env(event_type: str, data: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
+    env["LICHESSD_EVENT"] = event_type
     for k in _ENV_KEYS:
         val = data.get(k, "")
         env[f"LICHESSD_{k.upper()}"] = str(val)

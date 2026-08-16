@@ -13,8 +13,12 @@ class Config:
     pid_file: Path = field(default_factory=lambda: Path.home() / ".lichessd" / "lichessd.pid")
     config_path: Path = field(default_factory=lambda: Path.home() / ".lichessd" / "config")
     on_move: str | None = None
+    on_game_start: str | None = None
+    on_game_finish: str | None = None
     poll_interval: float = 30.0
     default_angle: str = "mix"
+    daemonize: bool = False
+    foreground: bool = False
 
     @classmethod
     def from_args(cls, argv: list[str] | None = None) -> Config:
@@ -51,6 +55,20 @@ class Config:
             dest="on_move",
             metavar="COMMAND",
             help="Command to run when a new move is detected",
+        )
+        parser.add_argument(
+            "--on-game-start",
+            default=None,
+            dest="on_game_start",
+            metavar="COMMAND",
+            help="Command to run when a correspondence game starts",
+        )
+        parser.add_argument(
+            "--on-game-finish",
+            default=None,
+            dest="on_game_finish",
+            metavar="COMMAND",
+            help="Command to run when a correspondence game finishes",
         )
         parser.add_argument(
             "--poll-interval",
@@ -90,8 +108,12 @@ class Config:
             pid_file=Path(args.pid_file),
             config_path=Path(args.config_path),
             on_move=args.on_move,
+            on_game_start=args.on_game_start,
+            on_game_finish=args.on_game_finish,
             poll_interval=args.poll_interval,
             default_angle=args.default_angle,
+            daemonize=args.daemonize,
+            foreground=args.foreground,
         )
 
     @staticmethod

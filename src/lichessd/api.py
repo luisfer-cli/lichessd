@@ -19,7 +19,7 @@ class LichessAPI:
         self._client = httpx.AsyncClient(
             base_url=LICHESS_BASE,
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=httpx.Timeout(30.0),
+            timeout=httpx.Timeout(10.0, connect=10.0, read=30.0),
         )
 
     async def close(self) -> None:
@@ -58,16 +58,17 @@ class LichessAPI:
         return cast("dict[str, Any]", resp.json())
 
     async def stream_events(self) -> httpx.Response:
-        return await self._client.send(
-            self._client.build_request("GET", "/api/stream/event"),
-            stream=True,
-        )
+        request = self._client.build_request("GET", "/api/stream/event")
+        request.extensions = {"timeout": {"read": None}}
+        return await self._client.send(request, stream=True)
 
     async def stream_game(self, game_id: str) -> httpx.Response:
-        return await self._client.send(
-            self._client.build_request("GET", f"/api/board/game/stream/{game_id}"),
-            stream=True,
+        request = self._client.build_request(
+            "GET",
+            f"/api/board/game/stream/{game_id}",
         )
+        request.extensions = {"timeout": {"read": None}}
+        return await self._client.send(request, stream=True)
 
     async def make_move(
         self,
@@ -102,4 +103,143 @@ class LichessAPI:
 
     async def get_daily_puzzle(self) -> dict[str, Any]:
         resp = await self._request("GET", "/api/puzzle/daily")
+        return cast("dict[str, Any]", resp.json())
+
+    async def export_game(
+        self,
+        game_id: str,
+        *,
+        as_pgn: bool = True,
+        moves: bool = True,
+        tags: bool = True,
+        clocks: bool = True,
+        evals: bool = True,
+        opening: bool = True,
+        literate: bool = False,
+    ) -> dict[str, Any] | str:
+        params: dict[str, str | int] = {
+            "moves": str(moves).lower(),
+            "tags": str(tags).lower(),
+            "clocks": str(clocks).lower(),
+            "evals": str(evals).lower(),
+            "opening": str(opening).lower(),
+            "literate": str(literate).lower(),
+        }
+        headers: dict[str, str] = {}
+        if not as_pgn:
+            headers["Accept"] = "application/json"
+        resp = await self._request(
+            "GET",
+            f"/api/game/export/{game_id}",
+            params=params,
+            headers=headers,
+        )
+        if as_pgn:
+            return resp.text
+        return cast("dict[str, Any]", resp.json())
+
+    async def create_seek(
+        self,
+        *,
+        days: int | None = None,
+        time: float | None = None,
+        increment: int = 5,
+        rated: bool = False,
+        variant: str = "standard",
+        rating_range: str | None = None,
+        color: str = "random",
+    ) -> dict[str, Any]:
+        data: dict[str, str | int | float] = {
+            "rated": str(rated).lower(),
+            "variant": variant,
+            "color": color,
+        }
+        if days is not None:
+            data["days"] = days
+        else:
+            data["time"] = time if time is not None else 10
+            data["increment"] = increment
+        if rating_range:
+            data["ratingRange"] = rating_range
+        resp = await self._request(
+            "POST",
+            "/api/board/seek",
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        return cast("dict[str, Any]", resp.json())
+
+    async def create_challenge(
+        self,
+        username: str,
+        *,
+        days: int | None = None,
+        clock_limit: int | None = None,
+        clock_increment: int = 5,
+        rated: bool = False,
+        variant: str = "standard",
+        color: str = "random",
+        fen: str | None = None,
+        message: str | None = None,
+        keep_alive_stream: bool = False,
+    ) -> dict[str, Any]:
+        data: dict[str, str | int] = {
+            "rated": str(rated).lower(),
+            "variant": variant,
+            "color": color,
+        }
+        if days is not None:
+            data["days"] = days
+        elif clock_limit is not None:
+            data["clock.limit"] = clock_limit
+            data["clock.increment"] = clock_increment
+        if fen:
+            data["fen"] = fen
+        if message:
+            data["message"] = message
+        if keep_alive_stream:
+            data["keepAliveStream"] = "true"
+        resp = await self._request(
+            "POST",
+            f"/api/challenge/{username}",
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        return cast("dict[str, Any]", resp.json())
+
+    async def accept_challenge(self, challenge_id: str) -> dict[str, Any]:
+        resp = await self._request(
+            "POST",
+            f"/api/challenge/accept/{challenge_id}",
+        )
+        return cast("dict[str, Any]", resp.json())
+
+    async def decline_challenge(
+        self,
+        challenge_id: str,
+        *,
+        reason: str = "generic",
+    ) -> dict[str, Any]:
+        resp = await self._request(
+            "POST",
+            f"/api/challenge/decline/{challenge_id}",
+            data={"reason": reason},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        return cast("dict[str, Any]", resp.json())
+
+    async def answer_puzzle(
+        self,
+        puzzle_id: str,
+        solution: list[str] | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {}
+        if solution:
+            params["solution"] = " ".join(solution)
+        resp = await self._request(
+            "POST",
+            f"/api/puzzle/{puzzle_id}/answer",
+            data=params or None,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
         return cast("dict[str, Any]", resp.json())
