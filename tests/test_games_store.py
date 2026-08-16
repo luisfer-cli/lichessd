@@ -216,6 +216,25 @@ class TestStreamGame(unittest.IsolatedAsyncioTestCase):
         board.push_uci("e7e5")
         self.assertEqual(store._games["g1"].fen, board.fen())
 
+    async def test_stream_ignores_null_keepalive(self) -> None:
+        api = FakeAPI()
+        api.stream_responses = [
+            FakeStreamResponse(
+                200,
+                ["null", '{"type": "gameState", "moves": "e2e4 e7e5", "status": "started"}'],
+            ),
+            FakeStreamResponse(404),
+        ]
+        store = _store_with_game(api)
+        events: list[str] = []
+
+        async def on_event(event_type: str, data: dict[str, object]) -> None:
+            events.append(event_type)
+
+        store.on_event = on_event
+        await store.stream_game("g1")
+        self.assertEqual(events, ["move"])
+
     async def test_start_stream_on_sync_game_start(self) -> None:
         api = FakeAPI(playing=[_entry("g1", "")])
         store = GameStore(api=api)

@@ -90,11 +90,13 @@ class GameStore:
                         event = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    if not isinstance(event, dict):
+                        continue
                     event_type = event.get("type", "")
                     if event_type == "gameStart":
                         game = event.get("game", {})
                         state = _state_from_entry(game) if isinstance(game, dict) else None
-                        if state is not None:
+                        if state is not None and state.game_id not in self._games:
                             self._games[state.game_id] = state
                             self._start_stream(state.game_id)
                             await self._emit(
@@ -193,6 +195,8 @@ class GameStore:
                     try:
                         event = json.loads(line)
                     except json.JSONDecodeError:
+                        continue
+                    if not isinstance(event, dict):
                         continue
                     if event.get("type") in ("gameFull", "gameState"):
                         await self._handle_game_state(game_id, event)

@@ -5,7 +5,13 @@ import logging
 
 from lichessd.api import LichessAPI
 from lichessd.config import Config
-from lichessd.daemon import daemonize, install_signal_handlers, should_shutdown
+from lichessd.daemon import (
+    check_not_running,
+    daemonize,
+    install_signal_handlers,
+    should_shutdown,
+    write_pid_file,
+)
 from lichessd.games import GameStore
 from lichessd.server import UnixSocketServer
 
@@ -22,21 +28,20 @@ def main() -> None:
     )
 
     config.socket_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if config.pid_file:
-        config.pid_file.parent.mkdir(parents=True, exist_ok=True)
+    check_not_running(config.pid_file)
 
     if config.daemonize and not config.foreground:
         daemonize(config.pid_file)
     else:
         install_signal_handlers()
+        write_pid_file(config.pid_file)
 
     try:
         asyncio.run(_run(config))
     except KeyboardInterrupt:
         pass
     finally:
-        if config.pid_file and config.pid_file.exists():
+        if config.pid_file.exists():
             config.pid_file.unlink()
 
 

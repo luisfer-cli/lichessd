@@ -1,10 +1,32 @@
-# Python-generated files
+# Byte-compiled / Python cache
 __pycache__/
-*.py[oc]
+*.py[cod]
+
+# Packaging & build artifacts
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+*.whl
+
+# PyInstaller
+*.spec
+/lichessd
 
 # Virtual environments
-.venv
+.venv/
+venv/
+env/
+
+# Tool caches & coverage
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Editors & OS
+.idea/
+.vscode/
+.DS_Store
