@@ -59,7 +59,6 @@ class GameStore:
                 continue
             self._games[state.game_id] = state
             self._start_stream(state.game_id)
-            await self._emit("game_start", _game_state_to_event(state))
 
     async def _stream_events_loop(self) -> None:
         logger.info("Global event stream started")
@@ -232,7 +231,8 @@ class GameStore:
         if changed:
             state.last_move = last_move
             state.is_my_turn = _is_my_turn(state.color, len(move_list))
-            await self._emit("move", _game_state_to_event(state))
+            if state.is_my_turn:
+                await self._emit("move", _game_state_to_event(state))
 
         if is_finished:
             self._games.pop(game_id, None)

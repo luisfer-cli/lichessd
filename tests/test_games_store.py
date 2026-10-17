@@ -69,9 +69,7 @@ class TestInitialSync(unittest.IsolatedAsyncioTestCase):
 
         store.on_event = on_event
         await store._initial_sync()
-        self.assertEqual([e[0] for e in events], ["game_start", "game_start"])
-        self.assertEqual(events[0][1]["game_id"], "g1")
-        self.assertEqual(events[1][1]["game_id"], "g2")
+        self.assertEqual(events, [])
         self.assertEqual(set(store._games), {"g1", "g2"})
         self.assertEqual(store.get_game("g1").last_move, "e7e5")  # type: ignore[union-attr]
 
@@ -95,7 +93,7 @@ class TestInitialSync(unittest.IsolatedAsyncioTestCase):
             async def get_playing(self, nb: int = 20) -> dict[str, Any]:
                 raise RuntimeError("boom")
 
-        store = GameStore(api=BrokenAPI())  # type: ignore[arg-type]
+        store = GameStore(api=BrokenAPI())
         await store._initial_sync()  # should not raise
 
 
@@ -168,6 +166,29 @@ class TestStreamGame(unittest.IsolatedAsyncioTestCase):
         await store.stream_game("g1")
         self.assertEqual([e[0] for e in events], ["move"])
         self.assertEqual(events[0][1]["last_move"], "e7e5")
+
+    async def test_stream_ignores_my_own_move(self) -> None:
+        api = FakeAPI()
+        api.stream_responses = [
+            FakeStreamResponse(
+                200,
+                ['{"type": "gameState", "moves": "e2e4", "status": "started"}'],
+            ),
+            FakeStreamResponse(404),
+        ]
+        store = _store_with_game(api)
+        events: list[str] = []
+
+        async def on_event(event_type: str, data: dict[str, object]) -> None:
+            events.append(event_type)
+
+        store.on_event = on_event
+        await store.stream_game("g1")
+        self.assertEqual(events, [])
+        game = store.get_game("g1")
+        self.assertIsNotNone(game)
+        assert game is not None
+        self.assertEqual(game.last_move, "e2e4")
 
     async def test_stream_emits_finish_and_removes_game(self) -> None:
         api = FakeAPI()

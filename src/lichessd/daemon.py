@@ -61,7 +61,7 @@ def install_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, _handle_exit)
     signal.signal(signal.SIGINT, _handle_exit)
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
 
 _shutdown_flag = False
